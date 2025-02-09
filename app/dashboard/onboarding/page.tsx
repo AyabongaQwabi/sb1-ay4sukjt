@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -34,11 +35,24 @@ const PROVINCES = [
   'Western Cape'
 ];
 
+interface UploadProgress {
+  [key: string]: number;
+}
+
 export default function OnboardingPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress>({});
   const [towns, setTowns] = useState<any[]>([]);
+  
+  // Add new state variables for media
+  const [profileImage, setProfileImage] = useState<File | null>(null);
+  const [profileImagePreview, setProfileImagePreview] = useState<string>('');
+  const [galleryImages, setGalleryImages] = useState<File[]>([]);
+  const [galleryPreviews, setGalleryPreviews] = useState<string[]>([]);
+  const [demoSongs, setDemoSongs] = useState<File[]>([]);
+  const [youtubeLinks, setYoutubeLinks] = useState<string[]>(['', '', '', '']);
   const [recordLabels, setRecordLabels] = useState<any[]>([]);
   const [distributors, setDistributors] = useState<any[]>([]);
   const [newTown, setNewTown] = useState('');
@@ -65,7 +79,12 @@ export default function OnboardingPage() {
     risa_member: false,
     risa_id: '',
     sampra_member: false,
-    sampra_id: ''
+    sampra_id: '',
+    artist_bio: '',
+    profile_image_url: '',
+    gallery_images: [] as string[],
+    demo_songs: [] as string[],
+    youtube_links: [] as string[],
   });
 
   useEffect(() => {
@@ -141,6 +160,73 @@ export default function OnboardingPage() {
     setNewDistributor('');
   }
 
+  // Helper function to handle file selection
+  const handleFileSelect = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    type: 'profile' | 'gallery' | 'demo'
+  ) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    if (type === 'profile' && files[0]) {
+      setProfileImage(files[0]);
+      const preview = URL.createObjectURL(files[0]);
+      setProfileImagePreview(preview);
+    } else if (type === 'gallery') {
+      const newFiles = Array.from(files).slice(0, 6 - galleryImages.length);
+      setGalleryImages([...galleryImages, ...newFiles]);
+      const newPreviews = newFiles.map(file => URL.createObjectURL(file));
+      setGalleryPreviews([...galleryPreviews, ...newPreviews]);
+    } else if (type === 'demo') {
+      const newFiles = Array.from(files).slice(0, 5 - demoSongs.length);
+      setDemoSongs([...demoSongs, ...newFiles]);
+    }
+  };
+
+  // Helper function to remove files
+  const removeFile = (
+    index: number,
+    type: 'gallery' | 'demo' | 'youtube'
+  ) => {
+    if (type === 'gallery') {
+      setGalleryImages(galleryImages.filter((_, i) => i !== index));
+      setGalleryPreviews(galleryPreviews.filter((_, i) => i !== index));
+    } else if (type === 'demo') {
+      setDemoSongs(demoSongs.filter((_, i) => i !== index));
+    } else if (type === 'youtube') {
+      setYoutubeLinks(youtubeLinks.map((link, i) => i === index ? '' : link));
+    }
+  };
+
+  // Helper function to upload files to Supabase storage
+  const uploadFile = async (file: File, bucket: string) => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random()}.${fileExt}`;
+    
+    // Create unique key for this upload
+    const uploadKey = `${bucket}-${fileName}`;
+    setUploadProgress(prev => ({ ...prev, [uploadKey]: 0 }));
+
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .upload(fileName, file, {
+        onUploadProgress: (progress) => {
+          if (progress.totalBytes > 0) {
+            const percent = (progress.bytesUploaded / progress.totalBytes) * 100;
+            setUploadProgress(prev => ({ ...prev, [uploadKey]: percent }));
+          }
+        },
+      });
+    
+    if (error) throw error;
+    
+    const { data: { publicUrl } } = supabase.storage
+      .from(bucket)
+      .getPublicUrl(fileName);
+    
+    return { url: publicUrl, key: uploadKey };
+  };
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -150,10 +236,33 @@ export default function OnboardingPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
+      // Upload profile image
+        let profileImageUrl = '';
+        if (profileImage) {
+        const { url } = await uploadFile(profileImage, 'profile-images');
+        profileImageUrl = url;
+        }
+
+        // Upload gallery images
+        const galleryResults = await Promise.all(
+        galleryImages.map(file => uploadFile(file, 'gallery-images'))
+        );
+        const galleryUrls = galleryResults.map(result => result.url);
+
+        // Upload demo songs
+        const songResults = await Promise.all(
+        demoSongs.map(file => uploadFile(file, 'demo-songs'))
+        );
+        const songUrls = songResults.map(result => result.url);
+
       const { error: updateError } = await supabase
         .from('profiles')
         .update({
           ...formData,
+          profile_image_url: profileImageUrl,
+          gallery_images: galleryUrls,
+          demo_songs: songUrls,
+          youtube_links: youtubeLinks.filter(link => link),
           registration_complete: true
         })
         .eq('id', user.id);
@@ -167,10 +276,20 @@ export default function OnboardingPage() {
       setLoading(false);
     }
   }
-
+  const ProgressBar = ({ progress }: { progress: number }) => (
+    <div className="w-full bg-zinc-700 rounded-full h-2 mt-2">
+      <div
+        className="bg-red-600 h-2 rounded-full transition-all duration-300"
+        style={{ width: `${progress}%` }}
+      />
+    </div>
+  );
+  console.log("TOWNS", towns)
+  console.log("record Labels", recordLabels)
+  console.log("distributors", distributors)
   return (
-    <div className="min-h-screen bg-black p-8">
-      <div className="max-w-3xl mx-auto">
+    <div className="min-h-screen bg-black p-8 ">
+      <div className="max-w-3xl mx-auto my-20">
         <h1 className="text-3xl font-bold text-white mb-8">
           Complete Your Artist Profile
         </h1>
@@ -277,7 +396,7 @@ export default function OnboardingPage() {
                       <SelectValue placeholder="Select province" />
                     </SelectTrigger>
                     <SelectContent>
-                      {PROVINCES.map((province) => (
+                      {PROVINCES?.map((province) => (
                         <SelectItem key={province} value={province}>
                           {province}
                         </SelectItem>
@@ -297,17 +416,18 @@ export default function OnboardingPage() {
                         <SelectValue placeholder="Select town" />
                       </SelectTrigger>
                       <SelectContent>
-                        {towns.map((town) => (
+                        {towns?.map((town) => (
                           <SelectItem key={town.id} value={town.id}>
                             {town.name}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                    
 
                     <Dialog>
                       <DialogTrigger asChild>
-                        <Button variant="outline">Create</Button>
+                        <Button variant="outline">Add Town</Button>
                       </DialogTrigger>
                       <DialogContent>
                         <DialogHeader>
@@ -315,14 +435,14 @@ export default function OnboardingPage() {
                         </DialogHeader>
                         <div className="space-y-4">
                           <div>
-                            <Label>Town Name</Label>
+                            <Label className='my-4'>Town Name</Label>
                             <Input
                               value={newTown}
                               onChange={(e) => setNewTown(e.target.value)}
                             />
                           </div>
                           <div>
-                            <Label>Province</Label>
+                            <Label className='my-4'>Province</Label>
                             <Select
                               value={newTownProvince}
                               onValueChange={setNewTownProvince}
@@ -331,7 +451,7 @@ export default function OnboardingPage() {
                                 <SelectValue placeholder="Select province" />
                               </SelectTrigger>
                               <SelectContent>
-                                {PROVINCES.map((province) => (
+                                {PROVINCES?.map((province) => (
                                   <SelectItem key={province} value={province}>
                                     {province}
                                   </SelectItem>
@@ -344,6 +464,7 @@ export default function OnboardingPage() {
                       </DialogContent>
                     </Dialog>
                   </div>
+                  <p className='my-4 text-gray-400 text-xs'>Click "Add town" if you dont see your town from this list</p>
                 </div>
               </div>
             </div>
@@ -357,7 +478,7 @@ export default function OnboardingPage() {
             
             <div className="space-y-4">
               <div>
-                <Label>Record Label</Label>
+                <Label className='my-4'>Record Label</Label>
                 <div className="flex gap-2">
                   <Select
                     value={formData.record_label_id}
@@ -367,8 +488,8 @@ export default function OnboardingPage() {
                       <SelectValue placeholder="Select record label" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Independent</SelectItem>
-                      {recordLabels.map((label) => (
+                      <SelectItem value="Independant">I am Independent</SelectItem>
+                      {recordLabels?.map((label) => (
                         <SelectItem key={label.id} value={label.id}>
                           {label.name}
                         </SelectItem>
@@ -378,7 +499,7 @@ export default function OnboardingPage() {
 
                   <Dialog>
                     <DialogTrigger asChild>
-                      <Button variant="outline">Create</Button>
+                      <Button variant="outline">Add Label</Button>
                     </DialogTrigger>
                     <DialogContent>
                       <DialogHeader>
@@ -386,7 +507,7 @@ export default function OnboardingPage() {
                       </DialogHeader>
                       <div className="space-y-4">
                         <div>
-                          <Label>Label Name</Label>
+                          <Label className='my-4'>Label Name</Label>
                           <Input
                             value={newLabel}
                             onChange={(e) => setNewLabel(e.target.value)}
@@ -397,6 +518,8 @@ export default function OnboardingPage() {
                     </DialogContent>
                   </Dialog>
                 </div>
+                <p className='my-4 text-gray-400 text-xs'>Click "Add Label" if you dont see your label from this list</p>
+                
               </div>
 
               <div className="flex items-center space-x-2">
@@ -409,7 +532,7 @@ export default function OnboardingPage() {
               </div>
 
               <div>
-                <Label>Distributor</Label>
+                <Label className='my-4'>Distributor</Label>
                 <div className="flex gap-2">
                   <Select
                     value={formData.distributor_id}
@@ -419,7 +542,7 @@ export default function OnboardingPage() {
                       <SelectValue placeholder="Select distributor" />
                     </SelectTrigger>
                     <SelectContent>
-                      {distributors.map((distributor) => (
+                      {distributors?.map((distributor) => (
                         <SelectItem key={distributor.id} value={distributor.id}>
                           {distributor.name}
                         </SelectItem>
@@ -429,7 +552,7 @@ export default function OnboardingPage() {
 
                   <Dialog>
                     <DialogTrigger asChild>
-                      <Button variant="outline">Create</Button>
+                      <Button variant="outline">Add Distro</Button>
                     </DialogTrigger>
                     <DialogContent>
                       <DialogHeader>
@@ -437,18 +560,20 @@ export default function OnboardingPage() {
                       </DialogHeader>
                       <div className="space-y-4">
                         <div>
-                          <Label>Distributor Name</Label>
+                          <Label className='my-4'>Distributor Name</Label>
                           <Input
                             value={newDistributor}
                             onChange={(e) => setNewDistributor(e.target.value)}
                           />
                         </div>
-                        <Button onClick={createDistributor}>Add Distributor</Button>
+                        <Button onClick={createDistributor}>Add Distro</Button>
                       </div>
                     </DialogContent>
                   </Dialog>
                 </div>
               </div>
+              <p className='my-4 text-gray-400 text-xs'>Click "Add Distro" if you dont see your distro from this list</p>
+                
             </div>
           </div>
 
@@ -537,7 +662,139 @@ export default function OnboardingPage() {
             </div>
           </div>
 
-          {error && (
+            {/* Media Upload Section */}
+            <div className="bg-zinc-900 rounded-lg p-6 space-y-4">
+            <h2 className="text-xl font-semibold text-white mb-4">
+              Media Upload
+            </h2>
+            
+            {/* Profile Image Upload */}
+        
+
+            <div className="space-y-4">
+              <Label>Profile Image</Label>
+              <div className="flex items-center gap-4">
+              <Input
+                type="file"
+                accept="image/*"
+                onChange={(e) => handleFileSelect(e, 'profile')}
+              />
+              {profileImagePreview && (
+                <div className="relative w-20 h-20">
+                <img
+                  src={profileImagePreview}
+                  alt="Profile preview"
+                  className="w-full h-full object-cover rounded-lg"
+                />
+                </div>
+              )}
+              </div>
+              {uploadProgress['profile-images'] && (
+              <ProgressBar progress={uploadProgress['profile-images']} />
+              )}
+            </div>
+
+            {/* Gallery Images Upload */}
+            <div className="space-y-4">
+              <Label>Gallery Images (Up to 6)</Label>
+              <Input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(e) => handleFileSelect(e, 'gallery')}
+              disabled={galleryImages.length >= 6}
+              />
+              <div className="grid grid-cols-3 gap-4">
+                {galleryPreviews.map((preview, index) => (
+                <div key={index} className="relative">
+                  <img
+                  src={preview}
+                  alt={`Gallery ${index + 1}`}
+                  className="w-full h-32 object-cover rounded-lg"
+                  />
+                  <Button
+                  variant="destructive"
+                  size="sm"
+                  className="absolute top-2 right-2"
+                  onClick={() => removeFile(index, 'gallery')}
+                  >
+                  X
+                  </Button>
+                  {uploadProgress[`gallery-images-${index}`] && (
+                  <ProgressBar progress={uploadProgress[`gallery-images-${index}`]} />
+                  )}
+                </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Artist Bio */}
+            <div className="space-y-4">
+              <Label>Artist Bio</Label>
+              <Textarea
+              value={formData.artist_bio}
+              onChange={(e) => setFormData({...formData, artist_bio: e.target.value})}
+              placeholder="Tell us about yourself..."
+              className="h-32"
+              />
+            </div>
+
+            {/* YouTube Links */}
+            <div className="space-y-4"></div>
+              <Label>YouTube Links (Up to 4)</Label>
+              {youtubeLinks.map((link, index) => (
+              <div key={index} className="flex gap-2">
+                <Input
+                value={link}
+                onChange={(e) => {
+                  const newLinks = [...youtubeLinks];
+                  newLinks[index] = e.target.value;
+                  setYoutubeLinks(newLinks);
+                }}
+                placeholder="YouTube URL"
+                />
+                <Button
+                variant="destructive"
+                onClick={() => removeFile(index, 'youtube')}
+                >
+                X
+                </Button>
+              </div>
+              ))}
+            </div>
+
+            {/* Demo Songs Upload */}
+            <div className="space-y-4">
+              <Label>Demo Songs (Up to 5 MP3s)</Label>
+              <Input
+              type="file"
+              accept=".mp3"
+              multiple
+              onChange={(e) => handleFileSelect(e, 'demo')}
+              disabled={demoSongs.length >= 5}
+              />
+              <div className="space-y-2">
+                {demoSongs.map((song, index) => (
+                <div key={index} className="flex flex-col bg-zinc-800 p-2 rounded">
+                  <div className="flex items-center justify-between">
+                  <span>{song.name}</span>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => removeFile(index, 'demo')}
+                  >
+                    X
+                  </Button>
+                  </div>
+                  {uploadProgress[`demo-songs-${index}`] && (
+                  <ProgressBar progress={uploadProgress[`demo-songs-${index}`]} />
+                  )}
+                </div>
+                ))}
+              </div>
+            </div>
+
+            {error && (
             <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-4">
               <p className="text-red-500 text-sm">{error}</p>
             </div>

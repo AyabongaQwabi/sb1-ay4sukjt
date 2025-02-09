@@ -86,7 +86,7 @@ export default function Register() {
         throw new Error('Failed to create user profile. Please try again.');
       }
 
-      router.push('/dashboard');
+      router.push('/dashboard/onboarding');
     } catch (err: any) {
       console.error('Registration error:', err);
       setError(err.message);

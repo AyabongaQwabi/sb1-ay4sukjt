@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { MusicIcon, LayoutDashboardIcon, BookOpenIcon, LogOutIcon } from 'lucide-react';
 import { useSupabase } from '@/components/providers/supabase-provider';
-
+import { supabase } from '@/lib/supabase';
 export default function DashboardLayout({
   children,
 }: {
