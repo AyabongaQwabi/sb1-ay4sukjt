@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { MusicIcon, UsersIcon, BookOpenIcon } from 'lucide-react';
 
 export default function DashboardPage() {
+  console.log("loaded dashboard page")
   const [profile, setProfile] = useState<any>(null);
   const [stats, setStats] = useState({
     totalPosts: 0,
@@ -15,6 +16,7 @@ export default function DashboardPage() {
   useEffect(() => {
     async function loadData() {
       const { data: { user } } = await supabase.auth.getUser();
+      console.log("dashboard user", user)
       if (!user) return;
 
       // Load profile

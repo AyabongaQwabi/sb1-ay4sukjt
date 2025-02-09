@@ -12,9 +12,10 @@ export default function Login() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function handleSubmit() {
     setLoading(true);
     setError('');
 
@@ -24,9 +25,6 @@ export default function Login() {
       return;
     }
 
-    const formData = new FormData(e.currentTarget);
-    const email = formData.get('email') as string;
-    const password = formData.get('password') as string;
 
     try {
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
@@ -34,6 +32,8 @@ export default function Login() {
         password,
       });
 
+      console.log(data, signInError)
+  
       if (signInError) {
         if (signInError.message.includes('Invalid login credentials')) {
           setError('Invalid email or password. Please try again.');
@@ -63,8 +63,9 @@ export default function Login() {
         setLoading(false);
         return;
       }
-
-      router.push('/dashboard');
+      console.log("routing to dash")
+      router.push("/dashboard")
+      console.log("done")
     } catch (err: any) {
       console.error('Login error:', err);
       setError('An unexpected error occurred. Please try again.');
@@ -85,7 +86,7 @@ export default function Login() {
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <div  className="space-y-4">
           <div>
             <Input
               name="email"
@@ -94,6 +95,8 @@ export default function Login() {
               required
               className="w-full"
               aria-label="Email address"
+              value={email}
+              onChange={(e)=> setEmail(e.target.value)}
             />
           </div>
           <div>
@@ -103,6 +106,8 @@ export default function Login() {
               required
               className="w-full"
               aria-label="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
             />
           </div>
 
@@ -116,6 +121,7 @@ export default function Login() {
             type="submit"
             className="w-full bg-red-600 hover:bg-red-700"
             disabled={loading}
+            onClick={handleSubmit}
           >
             {loading ? 'Logging in...' : 'Login'}
           </Button>
@@ -126,7 +132,7 @@ export default function Login() {
               Qala Apha (Register)
             </Link>
           </p>
-        </form>
+        </div>
       </div>
     </div>
   );
